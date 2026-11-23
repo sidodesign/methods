@@ -79,7 +79,7 @@ button{cursor:pointer}
 .cards{display:grid;grid-template-columns:1fr;gap:14px}
 @media (min-width:820px){.cards{grid-template-columns:1fr 1fr}}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 18px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
-.card.k-liked{border:2px solid var(--star)}
+.card.k-dont{border-left:5px solid var(--dont)}
 .tags{display:flex;flex-wrap:wrap;gap:6px}
 .tag{font-size:14px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--bg);color:var(--muted)}
 .tag.liked{background:var(--star-soft);color:var(--star)}
@@ -136,16 +136,11 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
     <button class="ghost" id="lockBtn" type="button">잠그기</button>
   </header>
 
-  <div class="counts" id="counts"></div>
   <nav class="groups" id="groups" aria-label="묶음"></nav>
   <div class="tools">
-    <input id="q" type="search" placeholder="찾기 (예: 레퍼런스, 금액)" aria-label="찾기">
-    <button class="kindf" type="button" data-kind="all" aria-pressed="true">전부</button>
-    <button class="kindf" type="button" data-kind="liked" aria-pressed="false">★ 좋다고 한 것</button>
-    <button class="kindf" type="button" data-kind="proposal" aria-pressed="false">제안</button>
+    <input id="q" type="search" placeholder="찾기 (예: 레퍼런스, 화면)" aria-label="찾기">
   </div>
   <div id="list"></div>
-  <section class="changes" id="changes"></section>
   <p class="foot">내용을 더하거나 바꾸려면 Claude에게 말해 주세요. 바뀌면 이 주소에서 새로 고치면 보입니다.</p>
 </main>
 
@@ -153,12 +148,11 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
 <script>
 (() => {
   const GROUPS = [
-    ["research","조사"],["plan","기획"],["team","함께 일하기"],["screen","화면"],["rules","작업 규칙"],["dont","하지 말 것"]];
-  const KIND = {liked:"★ 좋다고 함", rule:"● 계속 쓰는 방식", proposal:"제안 · 확인 전", dont:"하지 말 것"};
+    ["research","조사"],["plan","기획"],["team","함께 일하기"],["screen","화면"],["rules","작업 규칙"],["dont","피할 것"]];
   const S = crypto && crypto.subtle, te = new TextEncoder(), td = new TextDecoder();
   const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
   const $ = id => document.getElementById(id);
-  let DATA = null, ENC = null, group = "all", kind = "all";
+  let DATA = null, ENC = null, group = "all";
 
   async function openWith(pw) {
     const L = ENC.lock;
@@ -207,22 +201,15 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
   function show(d) {
     DATA = d; $("gate").hidden = true; $("app").hidden = false;
     $("ver").textContent = d.ver + " · " + fmtDate(d.date) + " 기준";
-    const live = d.methods.filter(m => !m.deleted && m.scope !== "estimate");
-    const n = k => live.filter(m => m.kind === k).length;
-    $("counts").innerHTML = "";
-    [["star", n("liked"), "좋다고 한 것"], ["", n("rule"), "계속 쓰는 것"], ["", n("proposal"), "제안"]].forEach(([c, v, t]) => {
-      const el = document.createElement("div"); el.className = "count " + c;
-      el.innerHTML = "<b></b><span></span>"; el.querySelector("b").textContent = v; el.querySelector("span").textContent = t;
-      $("counts").append(el);
-    });
+    const live = d.methods;
     const g = $("groups"); g.innerHTML = "";
-    [["all", "전체", live.length], ...GROUPS.map(([id, name]) => [id, name, live.filter(m => m.group === id).length])].forEach(([id, name, c]) => {
+    [["all", "전체", live.length], ...GROUPS.map(([id, name]) => [id, name, live.filter(m => m.g === id).length])].forEach(([id, name, c]) => {
       const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.dataset.g = id;
       b.textContent = name; const s = document.createElement("small"); s.textContent = c; b.append(s);
       b.addEventListener("click", () => { location.hash = id === "all" ? "" : id; route(); });
       g.append(b);
     });
-    renderChanges(); route();
+    route();
   }
   function route() {
     const h = location.hash.replace("#", "");
@@ -231,9 +218,6 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
     render();
   }
   window.addEventListener("hashchange", () => DATA && route());
-  document.querySelectorAll(".kindf").forEach(b => b.addEventListener("click", () => {
-    kind = b.dataset.kind; document.querySelectorAll(".kindf").forEach(x => x.setAttribute("aria-pressed", String(x === b))); render();
-  }));
   $("q").addEventListener("input", () => render());
 
   function fmtDate(s) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ""); return m ? (+m[2]) + "월 " + (+m[3]) + "일" : (s || ""); }
@@ -246,10 +230,9 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
     let shown = 0;
     GROUPS.forEach(([gid, gname]) => {
       if (group !== "all" && group !== gid) return;
-      const items = DATA.methods.filter(m => !m.deleted && m.scope !== "estimate" && m.group === gid)
-        .filter(m => kind === "all" || m.kind === kind)
-        .filter(m => !q || [m.title, m.quote, m.why, (m.steps || []).join(" "), m.source, m.code || ""].join(" ").toLowerCase().includes(q))
-        .sort((a, b) => (a.order || 0) - (b.order || 0));
+      const items = DATA.methods.filter(m => m.g === gid)
+        .filter(m => !q || [m.t, m.fit || "", m.why || "", (m.steps || []).join(" ")].join(" ").toLowerCase().includes(q))
+        .sort((a, b) => (a.o || 0) - (b.o || 0));
       if (!items.length) return;
       shown += items.length;
       const sec = el("section", "sec"); sec.id = "sec-" + gid;
@@ -259,42 +242,20 @@ ol{margin:8px 0 0;padding-left:1.4em;display:grid;gap:6px;font-size:17px}
       sec.append(cards); list.append(sec);
     });
     if (!shown) list.append(el("p", "empty", "맞는 방식이 없습니다. 찾는 말이나 묶음을 바꿔 보세요."));
-    const est = DATA.methods.filter(m => !m.deleted && m.scope === "estimate" && (group === "all" || group === m.group));
-    if (est.length && kind === "all" && !q) {
-      const d = el("details", "estonly"); d.append(el("summary", null, "견적 전용 " + est.length + "개 (이쪽 작업엔 쓰지 않음)"));
-      const cards = el("div", "cards"); est.forEach(m => cards.append(card(m))); d.append(cards); list.append(d);
-    }
   }
 
   function card(m) {
-    const c = el("article", "card k-" + m.kind);
-    const tags = el("div", "tags");
-    tags.append(el("span", "tag " + m.kind, KIND[m.kind] || m.kind));
-    if (m.source) tags.append(el("span", "tag", m.source + (m.code ? " " + m.code : "")));
-    c.append(tags, el("h3", null, m.title));
-    if (m.quote) {
-      const b = el("blockquote", "quote", "“" + m.quote + "”");
-      b.append(el("cite", null, fmtDate(m.date) + (m.source ? " · " + m.source : "")));
-      c.append(b);
-    }
+    const c = el("article", "card" + (m.g === "dont" ? " k-dont" : ""));
+    c.append(el("h3", null, m.t));
     if (m.fit) { const f = el("p", "fit"); f.append(el("b", null, "인스타에선 ")); f.append(document.createTextNode(m.fit)); c.append(f); }
     if (m.why) c.append(el("p", "why", m.why));
-    if ((m.steps && m.steps.length) || (m.history && m.history.length)) {
-      const d = el("details"); d.append(el("summary", null, m.steps && m.steps.length ? (m.steps.length > 1 ? "하는 순서 " + m.steps.length + "단계" : "실제로 한 것") : "예전 내용"));
-      if (m.steps && m.steps.length > 1) { const ol = el("ol"); m.steps.forEach(s => ol.append(el("li", null, s))); d.append(ol); }
-      else if (m.steps && m.steps.length === 1) d.append(el("p", "step1", m.steps[0]));
-      (m.history || []).forEach(x => d.append(el("p", "hist", fmtDate(x.date) + " 전: " + x.text)));
+    if (m.steps && m.steps.length) {
+      const d = el("details"); d.append(el("summary", null, m.steps.length > 1 ? "하는 순서 " + m.steps.length + "단계" : "하는 법"));
+      if (m.steps.length > 1) { const ol = el("ol"); m.steps.forEach(x => ol.append(el("li", null, x))); d.append(ol); }
+      else d.append(el("p", "step1", m.steps[0]));
       c.append(d);
     }
     return c;
-  }
-
-  function renderChanges() {
-    const box = $("changes"); box.innerHTML = ""; box.append(el("h2", null, "바뀐 내역"));
-    (DATA.changes || []).forEach(x => {
-      const d = el("div", "chg"); d.append(el("b", null, x.ver), el("span", null, fmtDate(x.date)));
-      const ul = el("ul"); (x.items || []).forEach(i => ul.append(el("li", null, i))); d.append(ul); box.append(d);
-    });
   }
 
   load();
